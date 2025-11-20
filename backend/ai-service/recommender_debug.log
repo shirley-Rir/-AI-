@@ -1,0 +1,153 @@
+
+==== 2025-11-20T10:23:05.471834 CALL_QWEN_API ====
+PROMPT:
+
+请分析下面的输入文本，抽取并判断其：核心情感（emotion）、发生场景（scene）、潜在主题（themes）、整体氛围（atmosphere）和标签列表（tags）。
+
+OUTPUT_REQUIREMENTS: 返回必须是严格的 JSON 字符串，且包含如下字段：
+- emotion: 字符串，表示主要情感（例如：孤独、喜悦、怀念、激情、忧伤、治愈、浪漫等）
+- scene: 字符串，表示发生场景（例如：深夜独处、雨天散步、夏日出游等）
+- themes: 数组，表示潜在主题关键词（每个元素为字符串，最多5个）
+- atmosphere: 字符串，表示整体氛围风格（简短描述）
+- tags: 数组，额外标签，用于搜索关键词（最多5个）
+- description: 字符串，1-2句简短描述总结（不超过40字）
+
+请注意：严格只输出 JSON，不要包含其它多余文本或注释。
+
+INPUT_TEXT: 离开我的依赖
+
+RESPONSE_TEXT:
+{"choices":[{"message":{"role":"assistant","content":"{\"emotion\": \"忧伤\", \"scene\": \"情感告别\", \"themes\": [\"离别\", \"成长\", \"独立\", \"释怀\", \"自我救赎\"], \"atmosphere\": \"静谧而略带哀愁\", \"tags\": [\"分手\", \"心理成长\", \"情感独立\", \"内心独白\", \"治愈\"], \"description\": \"在告别依赖中走向自我成长的静谧时刻\"}"},"finish_reason":"stop","index":0,"logprobs":null}],"object":"chat.completion","usage":{"prompt_tokens":232,"completion_tokens":88,"total_tokens":320,"prompt_tokens_details":{"cached_tokens":0}},"created":1763605385,"system_fingerprint":null,"model":"qwen-plus","id":"chatcmpl-9dc3a97d-f240-4081-bf76-fc78cabcf272"}
+
+==== 2025-11-20T10:23:17.135953 ====
+PROMPT:
+
+请根据下面的输入内容，如果用户输入的是歌名则接下来的推荐歌单里必须有这首歌曲，首先分析其中的核心情感、发生场景、潜在主题以及整体氛围；随后基于分析推荐6首中文或英文歌曲。
+
+返回格式必须严格为 JSON：
+{
+    "analysis": {
+        "core_emotions": ["情感1","情感2"],
+        "scenario": "场景描述",
+        "theme": "主题句",
+        "atmosphere": "氛围描述"
+    },
+    "recommendations": [
+        {"title": "歌名", "artist": "歌手", "language": "中文/英文", "reason": "不超过30字的推荐理由"},
+        ... 共5条
+    ]
+}
+
+严格注意：
+- 只输出 JSON，不要输出任何额外文本或解释；
+- recommendations 必须包含 5 条不重复歌曲，尽量大众熟悉但不过度烂大街；
+- 推荐理由不超过30字；
+- language 字段需标注为 "中文" 或 "英文"；
+- 不返回纯器乐曲，除非非常匹配场景。
+
+INPUT_TEXT: 离开我的依赖
+
+RESPONSE_TEXT:
+{"choices":[{"message":{"role":"assistant","content":"{\n    \"analysis\": {\n        \"core_emotions\": [\"失落\", \"释怀\"],\n        \"scenario\": \"一段关系结束后的独处时刻，面对空荡环境回忆过往\",\n        \"theme\": \"从情感依赖中抽离的成长与自我重建\",\n        \"atmosphere\": \"静谧冷清中带着清醒的伤感\"\n    },\n    \"recommendations\": [\n        {\"title\": \"离开我\", \"artist\": \"张惠妹\", \"language\": \"中文\", \"reason\": \"以强烈声线演绎决绝分手的痛楚\"},\n        {\"title\": \"Someone Like You\", \"artist\": \"Adele\", \"language\": \"英文\", \"reason\": \"钢琴衬底倾诉对旧爱的不舍与祝福\"},\n        {\"title\": \"成全\", \"artist\": \"林宥嘉\", \"language\": \"中文\", \"reason\": \"温柔嗓音唱出放手背后的隐忍心碎\"},\n        {\"title\": \"Back to Black\", \"artist\": \"Amy Winehouse\", \"language\": \"英文\", \"reason\": \"复古灵魂乐诉说爱情消亡的黑暗旅程\"},\n        {\"title\": \"你敢不敢\", \"artist\": \"杨宗纬\", \"language\": \"中文\", \"reason\": \"质问式旋律揭开感情中未竟的期待\"}\n    ]\n}"},"finish_reason":"stop","index":0,"logprobs":null}],"object":"chat.completion","usage":{"prompt_tokens":262,"completion_tokens":278,"total_tokens":540,"prompt_tokens_details":{"cached_tokens":0}},"created":1763605397,"system_fingerprint":null,"model":"qwen-plus","id":"chatcmpl-4a58081a-a4f9-4ff6-852f-e4e28142faa3"}
+
+==== 2025-11-20T10:25:47.762516 CALL_QWEN_API ====
+PROMPT:
+
+请分析下面的输入文本，抽取并判断其：核心情感（emotion）、发生场景（scene）、潜在主题（themes）、整体氛围（atmosphere）和标签列表（tags）。
+
+OUTPUT_REQUIREMENTS: 返回必须是严格的 JSON 字符串，且包含如下字段：
+- emotion: 字符串，表示主要情感（例如：孤独、喜悦、怀念、激情、忧伤、治愈、浪漫等）
+- scene: 字符串，表示发生场景（例如：深夜独处、雨天散步、夏日出游等）
+- themes: 数组，表示潜在主题关键词（每个元素为字符串，最多5个）
+- atmosphere: 字符串，表示整体氛围风格（简短描述）
+- tags: 数组，额外标签，用于搜索关键词（最多5个）
+- description: 字符串，1-2句简短描述总结（不超过40字）
+
+请注意：严格只输出 JSON，不要包含其它多余文本或注释。
+
+INPUT_TEXT: 离开我的依赖
+
+RESPONSE_TEXT:
+{"choices":[{"message":{"role":"assistant","content":"{\"emotion\": \"忧伤\", \"scene\": \"情感分离时刻\", \"themes\": [\"依赖\", \"放手\", \"成长\", \"离别\", \"自我独立\"], \"atmosphere\": \"静谧而沉重\", \"tags\": [\"分手\", \"心理变化\", \"成长\", \"情感释放\", \"独立\"], \"description\": \"在告别依赖中经历情感挣扎与自我觉醒。\"}"},"finish_reason":"stop","index":0,"logprobs":null}],"object":"chat.completion","usage":{"prompt_tokens":232,"completion_tokens":82,"total_tokens":314,"prompt_tokens_details":{"cached_tokens":0}},"created":1763605547,"system_fingerprint":null,"model":"qwen-plus","id":"chatcmpl-37707b8c-3cf6-48f4-84e3-67866a8bc875"}
+
+==== 2025-11-20T10:25:58.783432 ====
+PROMPT:
+
+请根据下面的输入内容，**如果用户输入的是歌名则接下来的推荐歌单里必须有这首歌曲**，首先分析其中的核心情感、发生场景、潜在主题以及整体氛围；随后基于分析推荐6首中文或英文歌曲。
+
+返回格式必须严格为 JSON：
+{
+    "analysis": {
+        "core_emotions": ["情感1","情感2"],
+        "scenario": "场景描述",
+        "theme": "主题句",
+        "atmosphere": "氛围描述"
+    },
+    "recommendations": [
+        {"title": "歌名", "artist": "歌手", "language": "中文/英文", "reason": "不超过30字的推荐理由"},
+        ... 共5条
+    ]
+}
+
+严格注意：
+- 只输出 JSON，不要输出任何额外文本或解释；
+- recommendations 必须包含 5 条不重复歌曲，尽量大众熟悉但不过度烂大街；
+- 推荐理由不超过30字；
+- language 字段需标注为 "中文" 或 "英文"；
+- 不返回纯器乐曲，除非非常匹配场景。
+
+INPUT_TEXT: 离开我的依赖
+
+RESPONSE_TEXT:
+{"choices":[{"message":{"role":"assistant","content":"{\n    \"analysis\": {\n        \"core_emotions\": [\"失落\", \"释怀\"],\n        \"scenario\": \"一段关系结束后，独自面对空虚与成长的时刻\",\n        \"theme\": \"从依赖到独立的情感蜕变\",\n        \"atmosphere\": \"静谧而略带伤感，夹杂着自我觉醒的力量\"\n    },\n    \"recommendations\": [\n        {\"title\": \"离开我的依赖\", \"artist\": \"林忆莲\", \"language\": \"中文\", \"reason\": \"原曲直击情感核心，深刻诠释依赖与放手\"},\n        {\"title\": \"成全\", \"artist\": \"林宥嘉\", \"language\": \"中文\", \"reason\": \"温柔声线诉说放手后的理解与自我救赎\"},\n        {\"title\": \"Someone Like You\", \"artist\": \"Adele\", \"language\": \"英文\", \"reason\": \"深情演绎失恋后对旧爱的怀念与祝福\"},\n        {\"title\": \"突然好想你\", \"artist\": \"五月天\", \"language\": \"中文\", \"reason\": \"强烈思念中挣扎，唤起共鸣的离别情绪\"},\n        {\"title\": \"Let It Be\", \"artist\": \"The Beatles\", \"language\": \"英文\", \"reason\": \"在混乱与痛苦中给予平静与前行的力量\"}\n    ]\n}"},"finish_reason":"stop","index":0,"logprobs":null}],"object":"chat.completion","usage":{"prompt_tokens":264,"completion_tokens":278,"total_tokens":542,"prompt_tokens_details":{"cached_tokens":0}},"created":1763605558,"system_fingerprint":null,"model":"qwen-plus","id":"chatcmpl-1af9a2fd-26e3-44e3-a634-53275b988d9a"}
+
+==== 2025-11-20T10:26:23.435231 CALL_QWEN_API ====
+PROMPT:
+
+请分析下面的输入文本，抽取并判断其：核心情感（emotion）、发生场景（scene）、潜在主题（themes）、整体氛围（atmosphere）和标签列表（tags）。
+
+OUTPUT_REQUIREMENTS: 返回必须是严格的 JSON 字符串，且包含如下字段：
+- emotion: 字符串，表示主要情感（例如：孤独、喜悦、怀念、激情、忧伤、治愈、浪漫等）
+- scene: 字符串，表示发生场景（例如：深夜独处、雨天散步、夏日出游等）
+- themes: 数组，表示潜在主题关键词（每个元素为字符串，最多5个）
+- atmosphere: 字符串，表示整体氛围风格（简短描述）
+- tags: 数组，额外标签，用于搜索关键词（最多5个）
+- description: 字符串，1-2句简短描述总结（不超过40字）
+
+请注意：严格只输出 JSON，不要包含其它多余文本或注释。
+
+INPUT_TEXT: 年少有为
+
+RESPONSE_TEXT:
+{"choices":[{"message":{"role":"assistant","content":"{\"emotion\": \"怀念\", \"scene\": \"青春回忆\", \"themes\": [\"成长\", \"青春\", \"梦想\", \"奋斗\", \"遗憾\"], \"atmosphere\": \"温暖而略带感伤\", \"tags\": [\"年少有为\", \"青春励志\", \"成长经历\", \"校园回忆\", \"追梦\"], \"description\": \"对年少时光的追忆与对未竟梦想的感慨\"}"},"finish_reason":"stop","index":0,"logprobs":null}],"object":"chat.completion","usage":{"prompt_tokens":231,"completion_tokens":88,"total_tokens":319,"prompt_tokens_details":{"cached_tokens":0}},"created":1763605583,"system_fingerprint":null,"model":"qwen-plus","id":"chatcmpl-af21fd05-9e66-4ab2-80d7-74a577aad8ec"}
+
+==== 2025-11-20T10:26:33.361645 ====
+PROMPT:
+
+请根据下面的输入内容，**如果用户输入的是歌名则接下来的推荐歌单里必须有这首歌曲**，首先分析其中的核心情感、发生场景、潜在主题以及整体氛围；随后基于分析推荐6首中文或英文歌曲。
+
+返回格式必须严格为 JSON：
+{
+    "analysis": {
+        "core_emotions": ["情感1","情感2"],
+        "scenario": "场景描述",
+        "theme": "主题句",
+        "atmosphere": "氛围描述"
+    },
+    "recommendations": [
+        {"title": "歌名", "artist": "歌手", "language": "中文/英文", "reason": "不超过30字的推荐理由"},
+        ... 共5条
+    ]
+}
+
+严格注意：
+- 只输出 JSON，不要输出任何额外文本或解释；
+- recommendations 必须包含 5 条不重复歌曲，尽量大众熟悉但不过度烂大街；
+- 推荐理由不超过30字；
+- language 字段需标注为 "中文" 或 "英文"；
+- 不返回纯器乐曲，除非非常匹配场景。
+
+INPUT_TEXT: 年少有为
+
+RESPONSE_TEXT:
+{"choices":[{"message":{"role":"assistant","content":"{\n    \"analysis\": {\n        \"core_emotions\": [\"遗憾\", \"追忆\"],\n        \"scenario\": \"回忆青春时光，反思年少时的选择与错过\",\n        \"theme\": \"在成长中悔悟，在岁月中怀念曾经的自己\",\n        \"atmosphere\": \"感伤而温情，带有淡淡的怀旧与自省\"\n    },\n    \"recommendations\": [\n        {\"title\": \"年少有为\", \"artist\": \"李荣浩\", \"language\": \"中文\", \"reason\": \"原曲直击成长遗憾与深情回望\"},\n        {\"title\": \"平凡之路\", \"artist\": \"朴树\", \"language\": \"中文\", \"reason\": \"讲述迷茫与坚持，呼应成长主题\"},\n        {\"title\": \"Best I Ever Had\", \"artist\": \"Gary Clark Jr.\", \"language\": \"英文\", \"reason\": \"蓝调深情，表达对逝去美好的眷恋\"},\n        {\"title\": \"突然好想你\", \"artist\": \"五月天\", \"language\": \"中文\", \"reason\": \"浓烈思念青春与旧日爱人\"},\n        {\"title\": \"Legends Never Die\", \"artist\": \"Against The Current\", \"language\": \"英文\", \"reason\": \"致敬未竟梦想，充满青春悲壮感\"}\n    ]\n}"},"finish_reason":"stop","index":0,"logprobs":null}],"object":"chat.completion","usage":{"prompt_tokens":263,"completion_tokens":273,"total_tokens":536,"prompt_tokens_details":{"cached_tokens":0}},"created":1763605593,"system_fingerprint":null,"model":"qwen-plus","id":"chatcmpl-75b7b60f-99b6-490f-bdb4-15821cb35539"}
