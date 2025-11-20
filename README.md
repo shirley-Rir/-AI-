@@ -143,5 +143,4 @@ VUE_APP_API_BASE_URL=http://localhost:5000
 - 服务间通过HTTP API进行通信
 
 ## 许可证
-
-MIT License
+CC BY-NC-SA 4.0
