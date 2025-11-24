@@ -1,12 +1,7 @@
-# 智能音乐推荐系统-V1
-该项目 目前仅做了本地运行；后续二次开发再考虑搭载到线上，不可商业用途，因为API的原因
+# 智能音乐推荐系统
 
 这是一个基于AI的智能音乐推荐系统，用户可以通过输入文本或上传图片来获取符合场景或情感的音乐推荐。
-**项目全程使用AI code生成**
-步骤
-1.一个idea -->用大模型进行项目内容及其架构，技术栈，接口等内容;
-2.前端页面设计:pixso（AI生成)
-3.将接口信息，技术栈，项目需求接入AI Agent（这里用的是智普CODEGEEX、copilot、codex、结合使用)
+
 ## 系统架构
 
 系统分为三个主要部分：
@@ -17,7 +12,7 @@
 ## 功能特点
 
 - 支持文本输入，分析场景和情感并推荐相应歌曲
-- 支持图片上传，识别图片中的场景并推荐相应歌曲 （目前效果不好，AI层面需要再开发）
+- 支持图片上传，识别图片中的场景并推荐相应歌曲
 - 提供音乐播放功能
 - 保存推荐历史记录，支持查看和清空
 
@@ -29,6 +24,7 @@
 2. 安装Python（版本 >= 3.8）
 3. 安装网易云音乐API服务（参考[NeteaseCloudMusicApiEnhanced](https://github.com/neteasecloudmusicapienhanced/api-enhanced)）
 4. 准备通义千问API密钥
+5. 准备COS腾讯云对象存储
 
 ### 部署步骤
 
@@ -93,6 +89,12 @@ npm run build
 ```
 
 ## 环境变量配置
+后端.env文件配置：
+注意配置对象存储的配置，这代码用的COS腾讯云的
+以及后端的auth.py文件配置:# JWT密钥，实际部署时应从环境变量获取
+JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your_secret_key_change_in_production')
+JWT_ALGORITHM = 'HS256'
+JWT_EXPIRATION_DELTA = timedelta(days=7)  # Token有效期7天
 
 ### 音乐服务 (.env)
 
@@ -143,4 +145,5 @@ VUE_APP_API_BASE_URL=http://localhost:5000
 - 服务间通过HTTP API进行通信
 
 ## 许可证
-CC BY-NC-SA 4.0
+
+MIT License
