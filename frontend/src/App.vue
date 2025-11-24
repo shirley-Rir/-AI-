@@ -7,12 +7,95 @@
     <div class="nav-container">
       <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">情感输入</router-link>
       <router-link to="/history" class="nav-link" :class="{ active: $route.path === '/history' }">推荐历史</router-link>
+      
+      <!-- 用户菜单 -->
+      <div class="user-menu">
+        <template v-if="isAuthenticated">
+          <el-dropdown @command="handleUserMenuCommand">
+            <span class="user-info">
+              <el-avatar :size="32" :src="user.avatar_url">
+                <User />
+              </el-avatar>
+              <span class="username">{{ user.display_name || user.username }}</span>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="profile">
+                  <el-icon><User /></el-icon>个人资料
+                </el-dropdown-item>
+                <el-dropdown-item command="logout" divided>
+                  <el-icon><SwitchButton /></el-icon>退出登录
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </template>
+        <template v-else>
+          <router-link to="/login" class="nav-link login-btn">登录/注册</router-link>
+        </template>
+      </div>
     </div>
     <div class="content-container">
       <router-view/>
     </div>
   </div>
 </template>
+
+<script>
+import { computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { User, SwitchButton } from '@element-plus/icons-vue'
+import auth from './auth'
+
+export default {
+  name: 'App',
+  components: {
+    User,
+    SwitchButton
+  },
+  setup() {
+    const router = useRouter()
+    
+    // 计算属性：是否已登录
+    const isAuthenticated = computed(() => auth.isAuthenticated())
+    
+    // 计算属性：当前用户信息
+    const user = computed(() => auth.user.value)
+    
+    // 处理用户菜单命令
+    const handleUserMenuCommand = (command) => {
+      if (command === 'profile') {
+        router.push('/profile')
+      } else if (command === 'logout') {
+        // 显示确认对话框
+        ElMessageBox.confirm('确定要退出登录吗？', '提示', {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }).then(() => {
+          // 清除认证信息
+          auth.clearAuth()
+          
+          // 显示成功消息
+          ElMessage.success('已退出登录')
+          
+          // 重定向到首页
+          router.push('/')
+        }).catch(() => {
+          // 用户取消
+        })
+      }
+    }
+    
+    return {
+      isAuthenticated,
+      user,
+      handleUserMenuCommand
+    }
+  }
+}
+</script>
 
 <style>
 :root {
@@ -107,5 +190,36 @@ body {
   max-width: 1440px;
   margin: 0 auto;
   padding: 0 1rem 2rem;
+}
+
+.user-menu {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.username {
+  margin-left: 0.5rem;
+  font-weight: 600;
+}
+
+.login-btn {
+  background: var(--primary-color);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 50px;
+  font-weight: 600;
+  transition: var(--transition);
+}
+
+.login-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--hover-shadow);
 }
 </style>
