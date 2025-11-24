@@ -16,16 +16,16 @@
         </div>
 
         <button class="soulmate-btn" @click="getTextRecommendations" :disabled="loading">
-          <i class="fas fa-heart"></i> 知音
+          <i class="fas fa-heart" :class="{'fa-spin': loading}"></i> {{ loading ? '正在分析...' : '知音' }}
         </button>
       </div>
 
       <div class="upload-container">
-        <div class="upload-box" @click="triggerFileInput">
+        <div class="upload-box" @click="triggerFileInput" :class="{'loading': loading}">
           <div class="upload-icon">
-            <i class="fas fa-cloud-upload-alt"></i>
+            <i class="fas" :class="loading ? 'fa-spinner fa-spin' : 'fa-cloud-upload-alt'"></i>
           </div>
-          <p class="upload-text">上传图片表达心情</p>
+          <p class="upload-text">{{ loading ? '正在分析图片...' : '上传图片表达心情' }}</p>
         </div>
         <input type="file" ref="fileInput" style="display: none" accept="image/*" @change="handleImageChange">
       </div>
@@ -44,7 +44,7 @@
 
     <div class="player-container">
       <div class="album-cover">
-        <img :src="currentSong && (currentSong.album && currentSong.album.picUrl) ? currentSong.album.picUrl : 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?ixlib=rb-4.0.3&auto=format&fit=crop&w=700&q=80'" alt="专辑封面" class="album-image">
+        <img :src="currentSong && ((currentSong.album && currentSong.album.picUrl) || currentSong.cover) ? (currentSong.album && currentSong.album.picUrl) || currentSong.cover : 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?ixlib=rb-4.0.3&auto=format&fit=crop&w=700&q=80'" alt="专辑封面" class="album-image">
       </div>
 
       <div class="player-controls">
@@ -520,6 +520,70 @@ export default {
     // 使用watch来监听currentTime变化
     watch(currentTime, updateProgressPercentage)
 
+    // 检查是否有从历史记录传递过来的歌曲信息
+    onMounted(() => {
+      // 检查是否需要显示播放器
+      const showPlayerFlag = localStorage.getItem('showPlayer')
+      if (showPlayerFlag === 'true') {
+        showPlayer.value = true
+        localStorage.removeItem('showPlayer')
+      }
+
+      const playSong = localStorage.getItem('playSong')
+      if (playSong) {
+        try {
+          const songInfo = JSON.parse(playSong)
+          // 清除存储的歌曲信息
+          localStorage.removeItem('playSong')
+
+          // 搜索歌曲
+          searchAndPlaySong(songInfo)
+        } catch (error) {
+          console.error('解析歌曲信息失败:', error)
+        }
+      }
+    })
+
+    // 搜索并播放歌曲
+    const searchAndPlaySong = async (songInfo) => {
+      try {
+        ElMessage.info('正在搜索歌曲...')
+        // 使用歌名+歌手进行搜索
+        const searchQuery = `${songInfo.name} ${songInfo.artist}`.trim()
+        const response = await api.searchSongs(searchQuery, 1)
+
+        // 检查搜索结果
+        if (response && response.songs && response.songs.length > 0) {
+          const song = response.songs[0]
+          // 显示播放器
+          showPlayer.value = true
+          // 播放歌曲
+          await selectSong(song)
+          ElMessage.success(`正在播放: ${song.name} - ${Array.isArray(song.artists) ? song.artists.map(a => a.name).join(', ') : song.artist}`)
+        } else {
+          // 尝试只用歌名搜索
+          if (songInfo.name && songInfo.name !== songInfo.artist) {
+            ElMessage.info('尝试使用歌名搜索...')
+            const nameOnlyResponse = await api.searchSongs(songInfo.name, 1)
+
+            if (nameOnlyResponse && nameOnlyResponse.songs && nameOnlyResponse.songs.length > 0) {
+              const song = nameOnlyResponse.songs[0]
+              showPlayer.value = true
+              await selectSong(song)
+              ElMessage.success(`正在播放: ${song.name} - ${Array.isArray(song.artists) ? song.artists.map(a => a.name).join(', ') : song.artist}`)
+            } else {
+              ElMessage.warning('未找到相关歌曲')
+            }
+          } else {
+            ElMessage.warning('未找到相关歌曲')
+          }
+        }
+      } catch (error) {
+        console.error('搜索歌曲失败:', error)
+        ElMessage.error('搜索歌曲失败')
+      }
+    }
+
     return {
       textInput,
       imageFile,
@@ -556,7 +620,8 @@ export default {
       setVolume,
       formatTime,
       selectLyric,
-      generateMoreRecommendations
+      generateMoreRecommendations,
+      searchAndPlaySong
     }
   }
 }
@@ -716,6 +781,23 @@ body {
   border-color: var(--primary-color);
   transform: translateY(-2px);
   background: linear-gradient(120deg, #fffbfc, #fbf7f3);
+}
+
+.upload-box.loading {
+  border-color: var(--primary-color);
+  background: linear-gradient(120deg, #fff5f7, #fff1f3);
+  cursor: not-allowed;
+  opacity: 0.9;
+}
+
+.upload-box.loading .upload-icon {
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
 }
 
 .upload-icon {
