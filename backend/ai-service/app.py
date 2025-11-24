@@ -10,6 +10,10 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from PIL import Image
 import io
+from database import init_db, get_or_create_user, save_recommendation, get_user_history, get_history_count, add_to_favorites, remove_from_favorites, get_favorites, search_history, delete_history, clear_user_history
+from auth import auth_required, get_current_user
+from user_api import user_bp
+from cos_storage import COSStorage
 
 # 加载环境变量
 load_dotenv()
@@ -22,10 +26,14 @@ MUSIC_SERVICE_URL = os.getenv('MUSIC_SERVICE_URL', 'http://localhost:3001')
 NETEASE_API_URL = os.getenv('NETEASE_API_URL', 'http://localhost:3000')
 QWEN_API_KEY = os.getenv('QWEN_API_KEY', 'your_qwen_api_key')
 
-# 存储推荐历史的简单内存存储（生产环境应使用数据库）
-recommendation_history = []
+# 初始化数据库
+init_db()
+
+# 注册用户API蓝图
+app.register_blueprint(user_bp)
 
 @app.route('/api/recommend/text', methods=['POST'])
+@auth_required
 def text_recommend():
     """基于文本推荐歌曲"""
     try:
@@ -68,31 +76,16 @@ def text_recommend():
             print(f"调用模型生成推荐失败: {e}")
             model_recs_obj = { 'analysis': {}, 'recommendations': [] }
 
-        # 4. 对模型返回的每一首候选（recommendations字段），调用音乐服务/网易云搜索以获取真实歌曲条目
-        # 归一化模型返回，确保是一个推荐条目列表
-        model_recs_list = normalize_model_recommendations(model_recs_obj)
-        matched_songs = []
-        for rec in model_recs_list:
-            title = (rec.get('title') or '').strip()
-            artist = (rec.get('artist') or '').strip()
-            if not title:
-                continue
-            # 首先仅用歌名进行搜索（用户要求），如果未命中，再尝试用 '歌名 歌手' 组合
-            search_results = search_songs([title])
-            if not search_results and artist:
-                search_results = search_songs([f"{title} {artist}"])
-            if search_results:
-                matched_songs.append(search_results[0])
+        # 4. 使用公共函数处理模型推荐
+        result = process_model_recommendations(model_recs_json)
+        song_details = result.get('songs', [])
 
-        # 5. 获取匹配歌曲的详细信息
-        song_details = get_song_details(matched_songs) if matched_songs else []
+        # 确保song_details是一个列表，即使为空
+        if not song_details:
+            song_details = []
 
-        # 5b. 无论是否匹配到真实歌曲，都把模型返回（原始与归一化后的）包含在响应中，
-        # 以便前端独立展示模型推荐列表。
-        try:
-            model_raw_str = model_recs_json if isinstance(model_recs_json, str) else json.dumps(model_recs_json, ensure_ascii=False)
-        except Exception:
-            model_raw_str = str(model_recs_json)
+        # 获取模型原始响应
+        model_raw_str = result.get('model_raw', str(model_recs_json))
 
         if not song_details:
             print("模型推荐的歌曲未能在音乐服务中匹配到真实条目，返回模型建议供参考")
@@ -101,19 +94,32 @@ def text_recommend():
                 'success': True,
                 'message': '未能在音乐服务中匹配到模型推荐，返回模型建议供参考',
                 'songs': [],
-                'model_recommendations': model_recs_obj,
+                'model_recommendations': result.get('model_recommendations', model_recs_obj),
                 'model_raw': model_raw_str,
                 'analysis': scene_emotion,
                 'keywords': keywords
             }), 200
 
         # 6. 保存推荐历史（保存实际匹配到的歌曲）
-        save_recommendation_history('text', text, None, song_details)
+        # 获取当前登录用户ID
+        current_user = get_current_user()
+        if current_user:
+            user_id = current_user['id']
+        else:
+            # 未登录用户使用默认用户
+            user_id = request.headers.get('X-User-ID')
+            if not user_id:
+                user_id = "default_user"  # 默认用户ID
+            # 使用用户名作为参数
+            user_id = get_or_create_user(str(user_id))
+        print(f"准备保存推荐记录，用户ID: {user_id}, 类型: text, 输入: {text[:50]}...")
+        save_recommendation(user_id, 'text', text, None, song_details, scene_emotion)
+        print("推荐记录已保存")
 
         return jsonify({
             'success': True,
             'songs': song_details,
-            'model_recommendations': model_recs_obj,
+            'model_recommendations': result.get('model_recommendations', model_recs_obj),
             'model_raw': model_raw_str,
             'analysis': scene_emotion,
             'keywords': keywords
@@ -123,6 +129,7 @@ def text_recommend():
         return jsonify({'success': False, 'message': '服务器错误，请稍后再试'}), 500
 
 @app.route('/api/recommend/image', methods=['POST'])
+@auth_required
 def image_recommend():
     """基于图片推荐歌曲"""
     try:
@@ -139,77 +146,175 @@ def image_recommend():
         image_bytes = file.read()
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 
-        # 1. 使用通义千问分析图片，提取场景/情感标签
-        scene_emotion = analyze_image(image_bytes)
+        # 1. 直接使用图片和提示词获取推荐
+        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 
-        # 2. 使用模型生成 5 条候选推荐（将图像分析结果作为模型输入）
-        model_input = scene_emotion.get('description', '')
-        # 组合 tags 以提供更丰富的上下文
-        tags = scene_emotion.get('tags', []) or []
-        if tags:
-            model_input = model_input + ' ' + ' '.join(tags)
+        # 构建符合OpenAI格式的消息，包含图片和提示词
+        model_messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}
+                    },
+                    {
+                        "type": "text",
+                        "text": """你是一个专业的音乐推荐助手，能够根据用户输入的内容（歌名、文字描述、歌词片段、情绪表达，或一张图片）分析其中蕴含的情感基调、具体场景、潜在主题以及氛围风格   并据此推荐5首最合适的不重复的中文或英文歌
+        请按以下步骤进行：
 
+首先分析输入内容中的核心情感（如：孤独、喜悦、怀念、激情、忧伤、治愈、浪漫等）、发生场景（如：深夜独处、毕业季、雨天散步、热恋期、失恋后等）及整体氛围。
+基于上述分析，挑选5首与之高度匹配的歌曲。每首歌必须包含：
+歌名（Song Title）
+歌手（Artist）
+要求：
+所有歌曲不得重复；
+优先选择大众熟悉但不过度烂大街的作品；
+可跨语言（中/英文均可），但需标注语言；
+不推荐纯器乐曲，除非特别适合；
+
+返回格式必须严格为 JSON：
+{
+    "analysis": {
+        "core_emotions": ["情感1","情感2"],
+        "scenario": "场景描述",
+        "theme": "主题句",
+        "atmosphere": "氛围描述"
+    },
+    "recommendations": [
+        {"title": "歌名", "artist": "歌手", "language": "中文/英文", "reason": "不超过30字的推荐理由"},
+        ... 共5条
+    ]
+}
+
+严格注意：
+- 只输出 JSON，不要输出任何额外文本或解释；
+- recommendations 必须包含 5 条不重复歌曲，尽量大众熟悉但不过度烂大街；
+- 推荐理由不超过30字；
+- language 字段需标注为 "中文" 或 "英文"；"""
+                    }
+                ]
+            }
+        ]
+
+        # 2. 直接调用模型获取推荐
         try:
-            model_recs_json = call_recommender_model(model_input)
+            api_key = os.getenv('DASHSCOPE_API_KEY') or os.getenv('QWEN_API_KEY', QWEN_API_KEY)
+            api_url = os.getenv('QWEN_API_URL') or os.getenv('QWEN_API_ENDPOINT') or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+
+            endpoint_url = api_url
+            if 'chat' not in api_url:
+                endpoint_url = api_url.rstrip('/') + '/chat/completions'
+
+            payload = {
+                'model': os.getenv('QWEN_VL_MODEL', 'qwen3-vl-plus'),
+                'messages': model_messages,
+                'temperature': float(os.getenv('QWEN_TEMPERATURE', '0.2')),
+                'max_tokens': int(os.getenv('QWEN_MAX_TOKENS', '800'))
+            }
+
+            response = requests.post(endpoint_url, headers=headers, json=payload, timeout=30)
+            if response.status_code != 200:
+                raise RuntimeError(f'model API 返回非200: {response.status_code} {response.text}')
+
+            data = response.json()
+            content = None
+            if isinstance(data, dict):
+                choices = data.get('choices')
+                if choices and isinstance(choices, list) and len(choices) > 0:
+                    first = choices[0]
+                    if isinstance(first, dict):
+                        msg = first.get('message')
+                        if isinstance(msg, dict):
+                            content = msg.get('content', '')
+
+            if not content:
+                content = response.text
+
+            
+
             try:
-                model_recs_obj = json.loads(model_recs_json) if isinstance(model_recs_json, str) else model_recs_json
-            except Exception:
-                model_recs_obj = model_recs_json
+                # 处理可能被代码块包裹的JSON
+                if isinstance(content, str):
+                    # 移除可能的代码块标记
+                    if content.strip().startswith('```json'):
+                        content = re.sub(r'```json\s*', '', content)
+                    if content.strip().endswith('```'):
+                        content = re.sub(r'\s*```$', '', content)
+                    content = content.strip()
+
+                model_recs_obj = json.loads(content) if isinstance(content, str) else content
+            except Exception as e:
+                print(f"解析JSON失败: {e}")
+                model_recs_obj = content
+
+            # 保存模型原始响应用于返回
+            model_recs_json = content
+
+            # 保存分析结果用于历史记录
+            image_analysis = model_recs_obj.get('analysis', {}) if isinstance(model_recs_obj, dict) else {}
+
         except Exception as e:
             print(f"调用模型生成图片推荐失败: {e}")
             model_recs_obj = { 'analysis': {}, 'recommendations': [] }
+            model_recs_json = json.dumps(model_recs_obj)
+            image_analysis = {}
 
-        # 3. 归一化模型返回并逐条只用歌曲名搜索（每次只取第一条匹配）
-        model_recs_list = normalize_model_recommendations(model_recs_obj)
-        matched_songs = []
-        for rec in model_recs_list:
-            title = (rec.get('title') or '').strip()
-            artist = (rec.get('artist') or '').strip()
-            if not title:
-                matched_songs.append(None)
-                continue
+        # 3. 使用公共函数处理模型推荐
+        result = process_model_recommendations(model_recs_json)
+        song_details = result.get('songs', [])
 
-            search_results = search_songs([title])
-            if not search_results and artist:
-                search_results = search_songs([f"{title} {artist}"])
+        # 确保song_details是一个列表，即使为空
+        if not song_details:
+            song_details = []
 
-            if search_results:
-                # 只取第一条匹配
-                matched_songs.append(search_results[0])
-            else:
-                matched_songs.append(None)
+        # 5. 上传图片到COS
+        image_url = None
+        try:
+            # 初始化COS存储
+            cos_storage = COSStorage()
+            # 上传图片到COS
+            image_url = cos_storage.upload_base64_image(image_base64, folder="history_images")
+            print(f"图片已上传到COS: {image_url}")
+        except Exception as e:
+            print(f"上传图片到COS失败: {str(e)}")
+            # 上传失败时继续使用base64图片
 
-        # 4. 获取匹配歌曲的详细信息（仅对存在匹配的ID调用 detail）
-        existing = [s for s in matched_songs if s]
-        song_details = get_song_details(existing) if existing else []
-
-        # 将 song_details 按照 model_recs_list 顺序映射回每条推荐（保持一一对应）
-        id_map = {}
-        for sd in song_details:
-            sid = str(sd.get('id') or sd.get('songId') or '')
-            if sid:
-                id_map[sid] = sd
-
-        final_songs = []
-        for s in matched_songs:
-            if not s:
-                final_songs.append(None)
-            else:
-                sid = str(s.get('id') or s.get('songId') or '')
-                if sid and sid in id_map:
-                    final_songs.append(id_map[sid])
-                else:
-                    final_songs.append(s)
-
-        # 5. 保存推荐历史（保存实际匹配到的歌曲）
-        save_recommendation_history('image', None, image_base64, [fs for fs in final_songs if fs])
+        # 6. 保存推荐历史（保存实际匹配到的歌曲）
+        # 获取当前登录用户ID
+        current_user = get_current_user()
+        if current_user:
+            user_id = current_user['id']
+        else:
+            # 未登录用户使用默认用户
+            user_id = request.headers.get('X-User-ID')
+            if not user_id:
+                user_id = "default_user"  # 默认用户ID
+        
+        # 如果用户已登录，直接使用用户ID
+        if current_user:
+            print(f"准备保存图片推荐记录，用户ID: {user_id}")
+            save_recommendation(user_id, 'image', None, image_base64, song_details, image_analysis, image_url)
+        else:
+            # 未登录用户使用默认用户
+            username = request.headers.get('X-User-ID') or "default_user"
+            # 创建或获取用户ID
+            user_id = get_or_create_user(username)
+            print(f"准备保存图片推荐记录，用户ID: {user_id}")
+            save_recommendation(user_id, 'image', None, image_base64, song_details, image_analysis, image_url)
+        print("图片推荐记录已保存")
 
         return jsonify({
             'success': True,
-            'songs': [fs for fs in final_songs if fs],
-            'model_recommendations': model_recs_obj,
-            'model_raw': model_recs_json,
-            'analysis': scene_emotion
+            'songs': song_details,
+            'model_recommendations': result.get('model_recommendations', model_recs_obj),
+            'model_raw': result.get('model_raw', model_recs_json),
+            'analysis': image_analysis
         })
     except Exception as e:
         print(f"图片推荐错误: {str(e)}")
@@ -336,16 +441,25 @@ def recommend_resolve():
         return jsonify({'success': False, 'message': '服务器错误'}), 500
 
 @app.route('/api/history', methods=['GET'])
+@auth_required
 def get_history():
     """获取推荐历史"""
     try:
         # 返回历史记录，按时间倒序排列
-        sorted_history = sorted(recommendation_history, 
-                              key=lambda x: x['timestamp'], 
-                              reverse=True)
+        # 获取当前登录用户
+        current_user = get_current_user()
+        if not current_user:
+            return jsonify({'success': False, 'message': '用户未登录'}), 401
+            
+        user_id = current_user['id']
+        
+        # 从数据库获取用户历史记录
+        print(f"尝试获取用户 {user_id} 的历史记录")
+        history = get_user_history(user_id)
+        print(f"获取用户 {user_id} 的历史记录: {history}")
         return jsonify({
             'success': True,
-            'history': sorted_history
+            'history': history
         })
     except Exception as e:
         print(f"获取历史记录错误: {str(e)}")
@@ -381,15 +495,30 @@ def get_song_url():
         return jsonify({'success': False, 'message': '服务器错误'}), 500
 
 @app.route('/api/history', methods=['DELETE'])
+@auth_required
 def clear_history():
     """清空推荐历史"""
     try:
-        global recommendation_history
-        recommendation_history = []
-        return jsonify({
-            'success': True,
-            'message': '历史记录已清空'
-        })
+        # 获取当前登录用户
+        current_user = get_current_user()
+        if not current_user:
+            return jsonify({'success': False, 'message': '用户未登录'}), 401
+
+        user_id = current_user['id']
+
+        # 调用数据库函数清空用户历史记录
+        success = clear_user_history(user_id)
+
+        if success:
+            return jsonify({
+                'success': True,
+                'message': '历史记录已清空'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': '没有可清空的历史记录'
+            })
     except Exception as e:
         print(f"清空历史记录错误: {str(e)}")
         return jsonify({'success': False, 'message': '清空历史记录失败'}), 500
@@ -409,31 +538,6 @@ def analyze_text(text):
         return {
             "type": "其他",
             "description": "无法分析",
-            "tags": ["默认"]
-        }
-
-def analyze_image(image_bytes):
-    """使用通义千问分析图片，提取场景/情感"""
-    try:
-        # 将图片转换为base64
-        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-
-        prompt = """请分析这张图片，判断它属于场景类、情感类还是其他，并给出具体的场景或情感描述。
-
-请以JSON格式返回结果，包含以下字段：
-- type: 场景类、情感类或其他
-- description: 具体的场景或情感描述
-- tags: 相关标签列表（最多5个）
-"""
-
-        response = call_qwen_api_with_image(prompt, image_base64)
-        return json.loads(response)
-    except Exception as e:
-        print(f"图片分析错误: {str(e)}")
-        # 返回默认值
-        return {
-            "type": "场景类",
-            "description": "图片场景",
             "tags": ["默认"]
         }
 
@@ -466,26 +570,33 @@ def generate_keywords(scene_emotion):
 def search_songs(keywords):
     """使用关键词搜索歌曲"""
     try:
-        # 使用第一个关键词搜索
-        keyword = keywords[0] if keywords else "默认"
+        if not keywords:
+            return []
 
-        # 调用音乐服务API
-        response = requests.get(f"{MUSIC_SERVICE_URL}/api/search", 
+        all_songs = []
+
+        # 为每个关键词进行搜索
+        for keyword in keywords:
+            print(f"搜索关键词: {keyword}")
+            # 调用音乐服务API
+            response = requests.get(f"{MUSIC_SERVICE_URL}/api/search", 
                               params={'keywords': keyword, 'limit': 10})
 
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('success'):
-                songs = data.get('songs', [])
-                # 只保留看起来像歌曲的对象（必须包含id或songId）
-                valid = []
-                for s in songs:
-                    if isinstance(s, dict) and (s.get('id') or s.get('songId')):
-                        valid.append(s)
-                if valid:
-                    return valid
-                else:
-                    print(f"音乐服务返回的结果缺少有效id，将被忽略: {songs}")
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('success'):
+                    songs = data.get('songs', [])
+                    # 只保留看起来像歌曲的对象（必须包含id或songId）
+                    valid = []
+                    for s in songs:
+                        if isinstance(s, dict) and (s.get('id') or s.get('songId')):
+                            valid.append(s)
+                    if valid:
+                        all_songs.extend(valid)
+                        print(f"找到 {len(valid)} 首歌曲")
+                    else:
+                        print(f"音乐服务返回的结果缺少有效id，将被忽略: {songs}")
+                    continue  # 继续下一个关键词
 
         # 如果失败，尝试直接调用网易云音乐API
         response = requests.get(f"{NETEASE_API_URL}/search", 
@@ -502,10 +613,88 @@ def search_songs(keywords):
             else:
                 print(f"网易云直连返回的结果缺少有效id，将被忽略: {songs}")
 
-        return []
+        # 去重：按照歌曲ID去重
+        seen_ids = set()
+        unique_songs = []
+        for s in all_songs:
+            sid = str(s.get('id') or s.get('songId') or '')
+            if sid and sid not in seen_ids:
+                seen_ids.add(sid)
+                unique_songs.append(s)
+
+        print(f"总共找到 {len(unique_songs)} 首不重复的歌曲")
+        return unique_songs
     except Exception as e:
         print(f"搜索歌曲错误: {str(e)}")
         return []
+
+
+def process_model_recommendations(model_recs_json):
+    """处理模型返回的推荐，调用音乐API获取歌曲详情"""
+    try:
+        # 解析模型返回的JSON
+        try:
+            model_recs_obj = json.loads(model_recs_json) if isinstance(model_recs_json, str) else model_recs_obj
+        except Exception:
+            # 如果解析失败，将原始字符串作为候选处理
+            model_recs_obj = model_recs_json
+
+        # 归一化模型返回，确保是一个推荐条目列表
+        model_recs_list = normalize_model_recommendations(model_recs_obj)
+        matched_songs = []
+
+        # 对每个推荐项进行搜索，每首歌只返回一个最匹配的结果
+        for rec in model_recs_list:
+            title = (rec.get('title') or '').strip()
+            artist = (rec.get('artist') or '').strip()
+            if not title:
+                continue
+
+            print(f"正在为推荐歌曲搜索匹配项: {title} - {artist}")
+
+            # 构建搜索关键词列表
+            search_keywords = []
+            if title:
+                search_keywords.append(title)
+            if artist:
+                search_keywords.append(f"{title} {artist}")
+
+            # 对每个关键词单独搜索，每个关键词只返回一个最匹配的结果
+            for keyword in search_keywords:
+                print(f"单独搜索关键词: {keyword}")
+                # 调用搜索函数，只获取一个最匹配的结果
+                search_results = search_songs([keyword])
+
+                if search_results:
+                    # 取第一个最匹配的结果
+                    matched_song = search_results[0]
+                    print(f"为 {title} 找到匹配: {matched_song.get('name')} - {matched_song.get('artists', [{}])[0].get('name', '')}")
+                    matched_songs.append(matched_song)
+                    break  # 找到一个匹配就停止
+                else:
+                    print(f"未找到 {title} 的匹配项")
+
+        # 获取匹配歌曲的详细信息
+        song_details = get_song_details(matched_songs) if matched_songs else []
+
+        # 返回处理后的结果
+        try:
+            model_raw_str = model_recs_json if isinstance(model_recs_json, str) else json.dumps(model_recs_json, ensure_ascii=False)
+        except Exception:
+            model_raw_str = str(model_recs_json)
+
+        return {
+            'songs': song_details,
+            'model_recommendations': model_recs_obj,
+            'model_raw': model_raw_str
+        }
+    except Exception as e:
+        print(f"处理模型推荐失败: {e}")
+        return {
+            'songs': [],
+            'model_recommendations': {},
+            'model_raw': str(model_recs_json)
+        }
 
 
 def normalize_model_recommendations(model_obj):
@@ -699,25 +888,6 @@ def get_song_details(songs):
         print(f"获取歌曲详情错误: {str(e)}")
         return []
 
-def save_recommendation_history(type, input_text, image_base64, songs):
-    """保存推荐历史"""
-    try:
-        history_item = {
-            'type': type,
-            'timestamp': datetime.datetime.now().isoformat(),
-            'input': input_text,
-            'imagePreview': f"data:image/jpeg;base64,{image_base64}" if image_base64 else None,
-            'songs': songs[:5]  # 只保存前5首歌
-        }
-
-        recommendation_history.append(history_item)
-
-        # 限制历史记录数量，最多保存50条
-        if len(recommendation_history) > 50:
-            recommendation_history.pop(0)
-    except Exception as e:
-        print(f"保存历史记录错误: {str(e)}")
-
 def call_qwen_api(prompt):
     """调用通义千问API"""
     try:
@@ -826,8 +996,17 @@ def build_recommender_prompt(user_text: str) -> str:
         模板示例（用户要求的格式）会包含输入文本和示例输出结构说明，要求模型返回包含analysis和recommendations的JSON。
         """
         prompt = f"""
-请根据下面的输入内容，**如果用户输入的是歌名则接下来的推荐歌单里必须有这首歌曲**，首先分析其中的核心情感、发生场景、潜在主题以及整体氛围；随后基于分析推荐5首中文或英文歌曲。
-
+你是一个专业的音乐推荐助手，能够根据用户输入的内容（歌名、文字描述、歌词片段、情绪表达，或一张图片）分析其中蕴含的**情感基调**、**具体场景**、**潜在主题**以及**氛围风格** 如果是歌名，那你推荐的这五首歌必须有一首是这个歌名  并据此推荐5首最合适的不重复的中文或英文歌
+请按以下步骤进行：
+1. 首先分析输入内容中的核心情感（如：孤独、喜悦、怀念、激情、忧伤、治愈、浪漫等）、发生场景（如：深夜独处、毕业季、雨天散步、热恋期、失恋后等）及整体氛围。
+2. 基于上述分析，挑选5首与之高度匹配的歌曲。每首歌必须包含：
+   - 歌名（Song Title）
+   - 歌手（Artist）
+3. 要求：
+   - 所有歌曲不得重复；
+   - 优先选择大众熟悉但不过度烂大街的作品；
+   - 可跨语言（中/英文均可），但需标注语言；
+   - 不推荐纯器乐曲，除非特别适合；，曲。
 返回格式必须严格为 JSON：
 {{
     "analysis": {{
@@ -852,85 +1031,6 @@ def build_recommender_prompt(user_text: str) -> str:
 INPUT_TEXT: {user_text}
 """
         return prompt
-
-def call_qwen_api_with_image(prompt, image_base64):
-    """调用通义千问多模态API（图片分析）"""
-    try:
-        print(f"调用通义千问多模态API（真实调用），提示词长度: {len(prompt) if prompt else 0}, 图片大小: {len(image_base64) if image_base64 else 0}")
-
-        api_key = os.getenv('QWEN_API_KEY', QWEN_API_KEY)
-        api_url = os.getenv('QWEN_API_URL') or os.getenv('QWEN_API_ENDPOINT')
-        if not api_key or api_key == 'your_qwen_api_key':
-            raise RuntimeError('QWEN_API_KEY 未配置或为占位符，请设置真实 API Key 到环境变量 QWEN_API_KEY')
-        if not api_url:
-            raise RuntimeError('QWEN_API_URL 未配置，请设置模型 API 的 URL 到环境变量 QWEN_API_URL')
-
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {api_key}'
-        }
-
-        endpoint_url = api_url
-        if 'chat' not in api_url:
-            endpoint_url = api_url.rstrip('/') + '/chat/completions'
-
-        # 把图片以 base64 安放在 user 消息中，模型端需要能够解析 IMAGE_BASE64: <base64> 的形式
-        combined = f"IMAGE_BASE64: {image_base64}\n{prompt}"
-
-        payload = {
-            'model': os.getenv('QWEN_MODEL', 'qwen-plus'),
-            'messages': [
-                {'role': 'system', 'content': 'You are a helpful assistant for multimodal image analysis.'},
-                {'role': 'user', 'content': combined}
-            ],
-            'temperature': float(os.getenv('QWEN_TEMPERATURE', '0.2')),
-            'max_tokens': int(os.getenv('QWEN_MAX_TOKENS', '800'))
-        }
-
-        resp = requests.post(endpoint_url, headers=headers, json=payload, timeout=30)
-        if resp.status_code != 200:
-            raise RuntimeError(f'model API 返回非200: {resp.status_code} {resp.text}')
-
-        # 可选 debug dump
-        try:
-            if os.getenv('DEBUG_DUMP_MODEL_RESPONSE', '').lower() == 'true':
-                debug_path = os.path.join(os.path.dirname(__file__), 'recommender_debug.log')
-                with open(debug_path, 'a', encoding='utf-8') as f:
-                    f.write(f"\n==== {datetime.datetime.now().isoformat()} CALL_QWEN_API_IMAGE ====\n")
-                    f.write("PROMPT:\n")
-                    f.write(prompt + "\n")
-                    f.write("RESPONSE_TEXT:\n")
-                    f.write(resp.text + "\n")
-        except Exception as _e:
-            print(f"写入模型调试日志失败: {_e}")
-
-        data = resp.json()
-        content = None
-        if isinstance(data, dict):
-            choices = data.get('choices')
-            if choices and isinstance(choices, list) and len(choices) > 0:
-                first = choices[0]
-                if isinstance(first, dict):
-                    msg = first.get('message') or first.get('delta')
-                    if isinstance(msg, dict):
-                        content = msg.get('content') or msg.get('content', '')
-                    content = content or first.get('text') or first.get('message', '')
-            if not content:
-                content = data.get('content') or data.get('text')
-
-        if not content:
-            content = resp.text
-
-        m = re.search(r'(\{[\s\S]*\}|\[[\s\S]*\])', content)
-        if m:
-            extracted = m.group(1).strip()
-            print(f"从模型响应中提取到 JSON 块 (call_qwen_api_with_image): {extracted[:200]}...")
-            return extracted
-
-        return content
-    except Exception as e:
-        print(f"调用通义千问多模态API错误: {str(e)}")
-        raise
 
 
 def call_recommender_model(user_text: str) -> str:
