@@ -1,4 +1,5 @@
 import axios from 'axios'
+import auth from '../auth'
 
 // 音乐服务axios实例
 const musicApi = axios.create({
@@ -46,7 +47,10 @@ musicApi.interceptors.response.use(
 // 为AI服务添加请求拦截器
 aiApi.interceptors.request.use(
   config => {
-    // 在发送请求之前做些什么
+    // 添加JWT令牌到请求头
+    if (auth.token.value) {
+      config.headers.Authorization = `Bearer ${auth.token.value}`
+    }
     return config
   },
   error => {
@@ -113,6 +117,13 @@ export default {
     return aiApi.get('/api/history')
   },
 
+  // 获取分页推荐历史
+  getPagedHistory(page = 1, pageSize = 5) {
+    return aiApi.get('/api/history/paged', {
+      params: { page, pageSize }
+    })
+  },
+
   // 清空推荐历史
   clearHistory() {
     return aiApi.delete('/api/history')
@@ -130,5 +141,46 @@ export default {
     return musicApi.get('/api/lyric/new', {
       params: { id: songId }
     })
+  },
+
+  // 用户认证相关API
+  // 用户登录
+  login(username, password) {
+    return aiApi.post('/api/user/login', { username, password })
+  },
+
+  // 用户注册
+  register(username, email, password, displayName) {
+    return aiApi.post('/api/user/register', {
+      username,
+      email,
+      password,
+      display_name: displayName
+    })
+  },
+
+  // 验证令牌
+  verifyToken(token) {
+    return aiApi.post('/api/user/verify-token', { token })
+  },
+
+  // 获取用户资料
+  getUserProfile() {
+    return aiApi.get('/api/user/profile')
+  },
+
+  // 更新用户资料
+  updateUserProfile(profile) {
+    return aiApi.put('/api/user/profile', profile)
+  },
+
+  // 获取用户偏好设置
+  getUserPreferences() {
+    return aiApi.get('/api/user/preferences')
+  },
+
+  // 更新用户偏好设置
+  updateUserPreferences(preferences) {
+    return aiApi.put('/api/user/preferences', preferences)
   }
 }
